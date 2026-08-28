@@ -5,20 +5,26 @@ on:
   push:
     paths:
       - "src/main/resources/downloadPath.json"
+      - ".github/workflows/main.yml"
 
 permissions:
   contents: read
 
+concurrency:
+  group: comic-download
+  cancel-in-progress: false
+
 jobs:
   download:
+    name: download
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -26,23 +32,60 @@ jobs:
           cache: maven
 
       - name: Build
-        run: mvn -B -DskipTests clean package
+        run: mvn --batch-mode --no-transfer-progress -DskipTests clean package
 
       - name: Run crawler
         shell: bash
         run: |
-          set -e
-          jar="$(find target -maxdepth 1 -type f -name '*-runner.jar' | head -n 1)"
-          test -n "$jar"
-          java -Dfile.encoding=UTF-8 -jar "$jar"
+          set +e
 
-      - name: Upload result
+          jar="$(find target -maxdepth 1 -type f -name '*-runner.jar' -print -quit)"
+          if [ -z "$jar" ]; then
+            echo "ERROR: 找不到 Quarkus runner jar"
+            exit 1
+          fi
+
+          # 25 分钟后强制结束，避免解析失败时永久等待。
+          timeout --signal=TERM --kill-after=30s 25m \
+            java -Dfile.encoding=UTF-8 \
+                 -Dcomic.download.path="$GITHUB_WORKSPACE/finder" \
+                 -jar "$jar"
+          status=$?
+
+          echo "--- crawler log (last 200 lines) ---"
+          if [ -f logs/finder/finder-info.log ]; then
+            tail -n 200 logs/finder/finder-info.log
+          else
+            echo "未找到日志文件"
+          fi
+
+          if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+            echo "ERROR: 爬虫超过 25 分钟仍未结束，可能是网页解析失败或访问被拦截"
+            exit 1
+          fi
+          if [ "$status" -ne 0 ]; then
+            echo "ERROR: 爬虫退出码为 $status"
+            exit "$status"
+          fi
+
+          if ! find "$GITHUB_WORKSPACE/finder" -type f -print -quit 2>/dev/null | grep -q .; then
+            echo "ERROR: 程序正常退出，但没有生成任何下载文件"
+            exit 1
+          fi
+
+      - name: Show output summary
+        if: always()
+        shell: bash
+        run: |
+          echo "--- generated files ---"
+          find "$GITHUB_WORKSPACE/finder" -type f 2>/dev/null | head -n 50 || true
+
+      - name: Upload crawler result and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: finder-result
           path: |
-            /home/runner/work/finder/**
+            finder/**
             logs/**
-            target/*.jar
           if-no-files-found: warn
