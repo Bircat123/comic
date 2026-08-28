@@ -75,10 +75,10 @@ public class TaskService {
             if(StrUtil.isEmpty(url)) {
                 url = StrUtil.subBetween(StrUtil.subBetween(body, ">收藏<", "開始閱讀"), "href=\"", "\"");
             }
-            if(StrUtil.isEmpty(url)) {
-                log.error(StrUtil.format("获取章节信息失败->解析漫画url为空,程序退出"));
-                Quarkus.asyncExit();
-            }
+        if (StrUtil.isEmpty(url)) {
+            log.error(StrUtil.format("获取章节信息失败->解析漫画url为空,程序退出"));
+            return Multi.createFrom().empty();
+        }
             var name = StrUtil.removeAny(StrUtil.splitTrim(this.removeIllegalCharacter(StrUtil.subBetween(body, "<h1>", "</h1>")), " ")
                     .toString(), "[", "]", ",");
             String id = StrUtil.subAfter(url, '/', true);
