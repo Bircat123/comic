@@ -1,1 +1,48 @@
+name: comic-download
 
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "src/main/resources/downloadPath.json"
+
+permissions:
+  contents: read
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Build
+        run: mvn -B -DskipTests clean package
+
+      - name: Run crawler
+        shell: bash
+        run: |
+          set -e
+          jar="$(find target -maxdepth 1 -type f -name '*-runner.jar' | head -n 1)"
+          test -n "$jar"
+          java -Dfile.encoding=UTF-8 -jar "$jar"
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: finder-result
+          path: |
+            /home/runner/work/finder/**
+            logs/**
+            target/*.jar
+          if-no-files-found: warn
